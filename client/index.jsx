@@ -23,6 +23,7 @@ const dictionaries = {
     accountOptions: '{label} 的更多操作', switchAccount: '切换', switchToAccount: '切换到 {label}',
     identityFallback: 'ChatGPT 账号',
     title: '关联 ChatGPT',
+    sidebarLabel: '关联ChatGPT',
     startHere: '连接 ChatGPT', subtitle: '在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。',
     browserTitle: '在浏览器中继续', chooseSignedIn: '选择已登录账号',
     addTitle: '添加另一个 ChatGPT 账号', addHint: '请在浏览器中使用要添加的账号登录。完成后，DSH 会切换到该账号。',
@@ -60,6 +61,7 @@ const dictionaries = {
     accountOptions: 'More options for {label}', switchAccount: 'Switch', switchToAccount: 'Switch to {label}',
     identityFallback: 'ChatGPT account',
     title: 'Link ChatGPT',
+    sidebarLabel: 'Link ChatGPT',
     startHere: 'Connect to ChatGPT', subtitle: 'Use your ChatGPT plan allowance in DeepSeek Harness.',
     browserTitle: 'Continue in your browser', chooseSignedIn: 'Choose a signed-in account',
     addTitle: 'Add another ChatGPT account', addHint: 'Choose another account in your browser. Once you sign in, DSH will switch to that account.',
@@ -513,7 +515,7 @@ export function apply(ctx) {
     return () => { style.remove(); };
   }, `${pluginId} styles`);
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-    name: 'sidebar.panellist', id: pluginId, order: 30, label: () => t('title'),
+    name: 'sidebar.panellist', id: pluginId, order: 30, label: () => t('sidebarLabel'),
   }, SidebarIcon));
   ctx.slots.inject('sidebar.panellist.trailing', () => ctx.slots.register({
     name: 'sidebar.panellist.trailing', id: pluginId, locale: pluginId,
