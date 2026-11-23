@@ -1,0 +1,14 @@
+/node_modules/
+/dist/
+/artifacts/
+/native/credential-key
+/native/credential-key-universal
+/native/.credential-key-*/
+/vendor/devkit/packages/local/dist/
+.DS_Store
+*.tgz
+.env
+.env.*
+!.env.example
+chatgpt-auth*.json
+chatgpt-host*.json
