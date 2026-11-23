@@ -1,11 +1,14 @@
 {
   "name": "dsh-use-chatgpt",
-  "version": "0.7.0",
-  "private": true,
+  "version": "1.0.0",
   "description": "ChatGPT plan model provider for a local DeepSeek Harness desktop instance",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houyanchao/dsh-use-chatgpt.git"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
