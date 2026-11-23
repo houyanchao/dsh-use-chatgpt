@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { Button, Menu } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Button, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import manifest from '../package.json' with { type: 'json' };
 import { PanelIcon } from './PanelIcon.jsx';
 import searchStyles from './native-chat-options.css';
@@ -24,6 +24,7 @@ const dictionaries = {
     identityFallback: 'ChatGPT 账号',
     title: '关联 ChatGPT',
     sidebarLabel: '关联ChatGPT',
+    viewProject: '查看开源项目',
     startHere: '连接 ChatGPT', subtitle: '在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。',
     browserTitle: '在浏览器中继续', chooseSignedIn: '选择已登录账号',
     addTitle: '添加另一个 ChatGPT 账号', addHint: '请在浏览器中使用要添加的账号登录。完成后，DSH 会切换到该账号。',
@@ -62,6 +63,7 @@ const dictionaries = {
     identityFallback: 'ChatGPT account',
     title: 'Link ChatGPT',
     sidebarLabel: 'Link ChatGPT',
+    viewProject: 'View open-source project',
     startHere: 'Connect to ChatGPT', subtitle: 'Use your ChatGPT plan allowance in DeepSeek Harness.',
     browserTitle: 'Continue in your browser', chooseSignedIn: 'Choose a signed-in account',
     addTitle: 'Add another ChatGPT account', addHint: 'Choose another account in your browser. Once you sign in, DSH will switch to that account.',
@@ -479,7 +481,17 @@ function ChatGPTPage({ ctx, t, updates }) {
     <div className={signedIn ? 'dsh-use-chatgpt-content' : 'cg-login-layout'}>
       {signedIn && <header className="dsh-use-chatgpt-header">
         <h1 id={titleId}>{t('title')}</h1>
-        <PluginVersion ctx={ctx} t={t} data={version} />
+        <div className="cg-header-links">
+          <PluginVersion ctx={ctx} t={t} data={version} />
+          <Tooltip label={t('viewProject')}>
+            <a className="cg-project-link" href="https://github.com/houyanchao/dsh-use-chatgpt"
+              target="_blank" rel="noopener noreferrer" aria-label={t('viewProject')}>
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+            </a>
+          </Tooltip>
+        </div>
         <p>{t('subtitle')}</p>
       </header>}
       {signedIn
