@@ -1,6 +1,6 @@
 {
   "name": "dsh-use-chatgpt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ChatGPT plan model provider for a local DeepSeek Harness desktop instance",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
@@ -14,7 +14,7 @@
     "./client": "./dist/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "native/credential-key", "native/credential-key-universal", "cordis.patch.yml"],
+  "files": ["dist", "docs/images/chatgpt-settings.png", "native/credential-key", "native/credential-key-universal", "cordis.patch.yml"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

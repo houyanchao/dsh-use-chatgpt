@@ -15,6 +15,11 @@ const missingAccount = () => new ChatGPTError('profile_not_found', '找不到选
 const connected = profile => profile?.status === 'connected' && Boolean(profile.credentials);
 const sharing = profile => connected(profile) && profile.scopes.includes(planScope);
 
+export function isAddingAccount(session, options) {
+  return session?.status === 'connected' && Boolean(session.profileId) && !options.reconsent
+    && (options.newProfile === true || (Boolean(options.profileId) && options.profileId !== session.profileId));
+}
+
 function publicIdentity(identity) {
   if (!identity) return {};
   const fields = {};
@@ -32,11 +37,11 @@ function sessionFor(state) {
     ...(profile.pendingRefresh ? { error: identityVerificationUnavailable().toJSON() } : {}) };
 }
 
-function clearTokens(profile, status) {
+function requireNewSignIn(profile) {
   delete profile.credentials;
   delete profile.profileIdToken;
   delete profile.pendingRefresh;
-  Object.assign(profile, { status, scopes: [], savedAt: now() });
+  Object.assign(profile, { status: 'reauth_required', scopes: [], savedAt: now() });
 }
 
 function availableLabel(state, requested) {
@@ -84,7 +89,10 @@ export function createChatGPT(config) {
   }
 
   function idle({ modelRequest = false } = {}) {
-    if (login || updating || (signingOutProfile && !modelRequest)) throw new ChatGPTError('connection_busy', '请先完成当前的账号操作。');
+    const loginBlocksRequest = login && (!modelRequest || !login.addingAccount);
+    if (updating || loginBlocksRequest || (signingOutProfile && !modelRequest)) {
+      throw new ChatGPTError('connection_busy', '请先完成当前的账号操作。');
+    }
   }
 
   function invalidate() {
@@ -93,7 +101,7 @@ export function createChatGPT(config) {
   }
 
   async function getSession() {
-    if (updating || login) return structuredClone(displayed);
+    if (updating || (login && !login.addingAccount)) return structuredClone(displayed);
     const beforeRead = generation;
     try {
       const latest = await store.transaction(({ state }) => sessionFor(state));
@@ -130,7 +138,7 @@ export function createChatGPT(config) {
           } catch (error) {
             const typed = asError(error);
             if (requiresReauthentication(typed) || ['invalid_id_token', 'invalid_token_response', 'account_mismatch'].includes(typed.code)) {
-              clearTokens(profile, 'reauth_required');
+              requireNewSignIn(profile);
               await save();
             }
             throw typed;
@@ -157,13 +165,18 @@ export function createChatGPT(config) {
   async function signIn(options = {}) {
     idle();
     if (options.newProfile && options.profileId) throw new ChatGPTError('invalid_profile', '请指定一个登录方式。');
-    invalidate();
-    const attempt = new AbortController();
+    const addingAccount = isAddingAccount(displayed, options);
+    const sourceProfileId = displayed.profileId;
+    const attempt = { controller: new AbortController(), addingAccount };
     login = attempt;
-    const signals = [attempt.signal, AbortSignal.timeout(600_000)];
+    const timeout = AbortSignal.timeout(60_000);
+    const signals = [attempt.controller.signal, timeout];
     if (options.signal) signals.push(options.signal);
     const signal = AbortSignal.any(signals);
-    publish({ ...displayed, status: 'connecting', sharing: false, error: undefined });
+    if (!addingAccount) {
+      invalidate();
+      publish({ ...displayed, status: 'connecting', sharing: false, error: undefined });
+    }
     try {
       const original = await store.transaction(async ({ state, hostId }) => {
         const id = options.profileId ?? (!options.newProfile && state.activeProfileId ? state.activeProfileId : randomUUID());
@@ -171,6 +184,7 @@ export function createChatGPT(config) {
         const pending = state.pendingRegistrations.find(item => item.id === id);
         if (options.profileId && !profile && !pending) throw missingAccount();
         if (profile?.requiresNewRegistration) throw new ChatGPTError('registration_upgrade_required', '请添加账号以完成新版本授权。');
+        if (addingAccount && state.activeProfileId !== sourceProfileId) throw changed();
         return { id, profile, pending, activeId: state.activeProfileId, host: await hostId() };
       }, signal);
 
@@ -205,7 +219,7 @@ export function createChatGPT(config) {
         previous ??= { clientId: registeredClientId };
         verified = await interact();
       }
-      const session = await store.transaction(async ({ state, save }) => {
+      return await store.transaction(async ({ state, save }) => {
         const { profile, pending } = inspect(state);
         if ((profile ?? pending)?.clientId !== verified.clientId) throw changed();
         const completed = { ...verified, id: original.id, label: (profile ?? pending).label };
@@ -214,14 +228,20 @@ export function createChatGPT(config) {
         state.pendingRegistrations = state.pendingRegistrations.filter(item => item.id !== original.id);
         state.activeProfileId = original.id;
         await save();
-        return sessionFor(state);
+        // Keep the previous account usable until the new grant is durably active.
+        if (addingAccount) invalidate();
+        return publish(sessionFor(state));
       }, signal);
-      signal.throwIfAborted();
-      return publish(session);
     } catch (error) {
-      const failure = signal.aborted ? cancelled() : asError(error);
+      let failure = asError(error);
+      if (signal.aborted) {
+        failure = timeout.aborted && signal.reason === timeout.reason
+          ? new ChatGPTError('authorization_timeout', '授权已超时，请重试。', true) : cancelled();
+      }
       const restored = await store.transaction(({ state }) => sessionFor(state)).catch(() => disconnected());
-      if (login === attempt && !updating) publish(failure.code === 'cancelled' ? restored : { ...restored, error: failure.toJSON() });
+      if (login === attempt && !updating) {
+        publish(addingAccount || failure.code === 'cancelled' ? restored : { ...restored, error: failure.toJSON() });
+      }
       throw failure;
     } finally {
       if (login === attempt) login = undefined;
@@ -250,7 +270,7 @@ export function createChatGPT(config) {
     signingOutProfile = profileId;
     updating = !profileId || profileId === displayed.profileId;
     if (updating) invalidate();
-    if (!profileId) login?.abort();
+    if (!profileId) login?.controller.abort();
     try {
       const { session, revocation } = await store.transaction(async ({ state, save }) => {
         const profile = profileId ? state.profiles.find(item => item.id === profileId) : active(state);
@@ -268,10 +288,10 @@ export function createChatGPT(config) {
             try { await revokeConnection(profile); }
             catch { revocation = new ChatGPTError('revocation_failed', '本机已退出，未确认远端撤销。可前往 ChatGPT 设置断开此应用。', true); }
           }
-          clearTokens(profile, 'disconnected');
-          if (chooseNext) {
-            const next = state.profiles.find(sharing) ?? state.profiles.find(connected);
-            if (next) state.activeProfileId = next.id;
+          state.profiles = state.profiles.filter(item => item.id !== profile.id);
+          if (profile.id === state.activeProfileId) {
+            const next = chooseNext ? state.profiles.find(sharing) ?? state.profiles.find(connected) : undefined;
+            state.activeProfileId = next?.id;
           }
           await save();
         }
@@ -293,7 +313,7 @@ export function createChatGPT(config) {
       if (typeof profileId !== 'string' || !profileId) throw missingAccount();
       await endConnection({ profileId });
     },
-    cancelSignIn() { login?.abort(); },
+    cancelSignIn() { login?.controller.abort(); },
     listProfiles() {
       return store.transaction(({ state }) => [
         ...state.profiles.map(profile => ({ id: profile.id, label: profile.label, status: profile.status,

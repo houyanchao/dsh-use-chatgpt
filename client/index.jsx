@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { Button, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Button, Menu, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import manifest from '../package.json' with { type: 'json' };
 import { PanelIcon } from './PanelIcon.jsx';
 import searchStyles from './native-chat-options.css';
@@ -27,8 +27,9 @@ const dictionaries = {
     viewProject: '查看开源项目',
     startHere: '连接 ChatGPT', subtitle: '在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。',
     browserTitle: '在浏览器中继续', chooseSignedIn: '选择已登录账号',
-    addTitle: '添加另一个 ChatGPT 账号', addHint: '请在浏览器中使用要添加的账号登录。完成后，DSH 会切换到该账号。',
-    cancelAdd: '取消添加', reconnectAccount: '重新连接', pendingAccount: '待完成授权', resumeAccount: '继续授权',
+    authorizeHint: '请在 1 分钟内完成浏览器中的授权。完成后将切换到该账号。',
+    authorizationFailed: '授权未完成', close: '关闭',
+    reconnectAccount: '重新连接', pendingAccount: '待完成授权', resumeAccount: '继续授权',
     signedOut: '已退出', expiredAccount: '需要重新登录', noConsent: '套餐尚未授权',
     differentAccount: '你选择了另一个账号。再次点击登录，即可用所选账号建立新连接。',
     account: '账号',
@@ -66,8 +67,9 @@ const dictionaries = {
     viewProject: 'View open-source project',
     startHere: 'Connect to ChatGPT', subtitle: 'Use your ChatGPT plan allowance in DeepSeek Harness.',
     browserTitle: 'Continue in your browser', chooseSignedIn: 'Choose a signed-in account',
-    addTitle: 'Add another ChatGPT account', addHint: 'Choose another account in your browser. Once you sign in, DSH will switch to that account.',
-    cancelAdd: 'Cancel adding account', reconnectAccount: 'Reconnect', pendingAccount: 'Authorization pending', resumeAccount: 'Continue sign-in',
+    authorizeHint: 'Complete authorization in your browser within 1 minute to switch to this account.',
+    authorizationFailed: 'Authorization incomplete', close: 'Close',
+    reconnectAccount: 'Reconnect', pendingAccount: 'Authorization pending', resumeAccount: 'Continue sign-in',
     signedOut: 'Signed out', expiredAccount: 'Sign in again', noConsent: 'Plan access not granted',
     differentAccount: 'You chose a different account. Select Continue with ChatGPT again to connect it.',
     account: 'Account',
@@ -129,6 +131,10 @@ function isSignIn(action) {
   return action === 'sign-in' || action === 'enable' || action === 'add-account';
 }
 
+function isAccountDialogAction(action) {
+  return action === 'add-account' || action === 'cancel-add';
+}
+
 function useConnection() {
   const [connection, setConnection] = useState(null);
   const [pending, setPending] = useState(null);
@@ -172,7 +178,7 @@ function useConnection() {
     };
   }, [refresh]);
 
-  const polling = connection?.status === 'connecting';
+  const polling = connection?.status === 'connecting' || connection?.addingAccount;
   useEffect(() => {
     if (!polling) return;
     const timer = window.setInterval(() => { void refresh(false); }, 1000);
@@ -197,7 +203,9 @@ function useConnection() {
       }
     } catch (failure) {
       failed = true;
-      if (!signal.aborted && revision.current === update) setError({ action, message: failure.message, code: failure.code });
+      if (!signal.aborted && revision.current === update && !(action === 'add-account' && failure.code === 'cancelled')) {
+        setError({ action, message: failure.message, code: failure.code });
+      }
     } finally {
       if (!signal.aborted && revision.current === update) {
         pendingAction.current = null;
@@ -207,7 +215,7 @@ function useConnection() {
     }
   }
 
-  return { connection, pending, error, refresh, run };
+  return { connection, pending, error, dismissError: () => setError(null), refresh, run };
 }
 
 function profileName(profile) {
@@ -294,7 +302,7 @@ function AccountRow({ profile, current, busy, t, run }) {
             { id: 'sign-out', label: t('signOut'), icon: <PanelIcon name="signOut" size={16} /> }]}
           onClose={() => setMenuOpen(false)}
           onSelect={() => { setMenuOpen(false); void run('sign-out-profile', { profileId: id }); }} />
-      </> : <button type="button" className="cg-account-action" disabled={busy}
+      </> : <button type="button" className="cg-account-action" disabled={busy} aria-haspopup="dialog"
         onClick={() => { void run('add-account', { profileId: id }); }}>
         {t(profile.pending ? 'resumeAccount' : 'reconnectAccount')}
       </button>}
@@ -302,7 +310,7 @@ function AccountRow({ profile, current, busy, t, run }) {
   </li>;
 }
 
-function Account({ t, state, adding }) {
+function Account({ t, state }) {
   const titleId = useId();
   const { connection, pending, error, run } = state;
   const { profileId, profiles = [] } = connection;
@@ -311,10 +319,10 @@ function Account({ t, state, adding }) {
     rows.unshift({ id: profileId, label: connection.profileLabel, identity: connection.identity,
       status: connection.status, sharing: connection.sharing });
   }
-  const waiting = adding || connection.status === 'connecting' || isSignIn(pending) || pending === 'cancel';
-  const busy = waiting || Boolean(pending);
+  const waiting = connection.status === 'connecting' || pending === 'enable' || pending === 'cancel';
+  const busy = waiting || (Boolean(pending) && !isAccountDialogAction(pending));
   const needsConsent = connection.status === 'connected' && !connection.sharing;
-  const message = error ? error.message || t('requestFailed') : !waiting && connection.error?.message;
+  const message = error ? !isAccountDialogAction(error.action) && (error.message || t('requestFailed')) : !waiting && connection.error?.message;
 
   return <section className="cg-account" aria-labelledby={titleId}>
     <header className="cg-account-heading"><h2 id={titleId}>{t('account')}</h2></header>
@@ -324,13 +332,10 @@ function Account({ t, state, adding }) {
     </ul>
     {message && <p className="dsh-use-chatgpt-error" role="alert">{message}</p>}
     {waiting ? <div className="cg-account-flow">
-      <div role="status">
-        {adding && <h3>{t('addTitle')}</h3>}
-        <p>{t(adding ? 'addHint' : 'connecting')}</p>
-      </div>
+      <p role="status">{t('connecting')}</p>
       <div className="dsh-use-chatgpt-actions">
-        <Button variant="outline" size="sm" disabled={pending === 'cancel' || pending === 'cancel-add'}
-          onClick={() => { void run(adding ? 'cancel-add' : 'cancel'); }}>{t(adding ? 'cancelAdd' : 'cancel')}</Button>
+        <Button variant="outline" size="sm" disabled={pending === 'cancel'}
+          onClick={() => { void run('cancel'); }}>{t('cancel')}</Button>
       </div>
     </div> : needsConsent && <div className="cg-account-flow">
       <p>{t('needsConsent')}</p>
@@ -338,7 +343,7 @@ function Account({ t, state, adding }) {
         <Button variant="primary" size="sm" disabled={busy} onClick={() => { void run('enable', { profileId }); }}>{t('enable')}</Button>
       </div>
     </div>}
-    <button type="button" className="cg-account-add" disabled={busy}
+    <button type="button" className="cg-account-add" disabled={busy} aria-haspopup="dialog"
       onClick={() => { void run('add-account', { newProfile: true }); }}>
       <PanelIcon name="plus" size={17} />{t('newAccount')}
     </button>
@@ -447,14 +452,14 @@ function PluginVersion({ ctx, t, data, loginFooter = false }) {
   </Wrapper>;
 }
 
-function WorkspaceBody({ t, language, state, adding }) {
+function WorkspaceBody({ t, language, state }) {
   const { connection, pending, run } = state;
-  const authorized = connection.status === 'connected' && connection.sharing && !adding;
+  const authorized = connection.status === 'connected' && connection.sharing;
   const profileId = connection?.profileId;
   const loadModels = useCallback((signal, force) => readModels(profileId, signal, force), [profileId]);
   const models = usePageResource(authorized && profileId ? loadModels : null);
   return <div className="cg-dashboard">
-    <Account t={t} state={state} adding={adding} />
+    <Account t={t} state={state} />
     {authorized && <>
       <ModelCatalog t={t} language={language} resource={models} profileId={profileId} />
       {connection.features?.webSearch &&
@@ -470,15 +475,22 @@ function WorkspaceBody({ t, language, state, adding }) {
 function ChatGPTPage({ ctx, t, updates }) {
   const titleId = useId();
   const state = useConnection();
-  const { connection, pending } = state;
-  const adding = connection?.addingAccount || pending === 'add-account' || pending === 'cancel-add';
+  const { connection, pending, error, run, dismissError } = state;
+  const authorizing = connection?.addingAccount || isAccountDialogAction(pending);
+  const dialogError = isAccountDialogAction(error?.action) ? error : null;
+  const dialogOpen = Boolean(authorizing || dialogError);
+  function closeDialog() {
+    if (authorizing) {
+      if (pending !== 'cancel-add') void run('cancel-add');
+    } else dismissError();
+  }
   const connectedProfile = connection?.profiles?.some(profile => profile.id === connection.profileId && profile.status === 'connected' && !profile.pending);
-  const signedIn = connection?.available && (connection.status === 'connected' || adding || (connection.status === 'connecting' && connectedProfile));
+  const signedIn = connection?.available && (connection.status === 'connected' || (connection.status === 'connecting' && connectedProfile));
   const version = useSyncExternalStore(updates.subscribe, updates.getSnapshot);
   const language = (ctx.locale.getSnapshot?.().active || document.documentElement.lang || 'zh').startsWith('en') ? 'en' : 'zh';
   useEffect(updates.refresh, [updates]);
   return <section className="dsh-use-chatgpt-page" aria-label={signedIn ? undefined : t('title')} aria-labelledby={signedIn ? titleId : undefined}>
-    <div className={signedIn ? 'dsh-use-chatgpt-content' : 'cg-login-layout'}>
+    <div className={signedIn ? 'dsh-use-chatgpt-content' : 'cg-login-layout'} inert={dialogOpen ? '' : undefined}>
       {signedIn && <header className="dsh-use-chatgpt-header">
         <h1 id={titleId}>{t('title')}</h1>
         <div className="cg-header-links">
@@ -495,10 +507,16 @@ function ChatGPTPage({ ctx, t, updates }) {
         <p>{t('subtitle')}</p>
       </header>}
       {signedIn
-        ? <WorkspaceBody key={connection.profileId} t={t} language={language} state={state} adding={adding} />
+        ? <WorkspaceBody key={connection.profileId} t={t} language={language} state={state} />
         : <LoginScreen t={t} state={state} />}
       {!signedIn && <PluginVersion ctx={ctx} t={t} data={version} loginFooter />}
     </div>
+    <Modal open={dialogOpen} title={t(dialogError ? 'authorizationFailed' : 'browserTitle')}
+      description={dialogError ? dialogError.message || t('requestFailed') : t('authorizeHint')}
+      closeLabel={t(authorizing ? 'cancel' : 'close')} onClose={closeDialog}
+      footer={<Button variant="outline" autoFocus disabled={pending === 'cancel-add'} onClick={closeDialog}>
+        {t(authorizing ? 'cancel' : 'close')}
+      </Button>} />
   </section>;
 }
 

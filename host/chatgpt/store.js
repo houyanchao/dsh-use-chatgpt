@@ -185,23 +185,28 @@ export class AccountStore {
   async #load(save) {
     const record = await readRecord(join(this.directory, authFile));
     if (record === undefined) return newState();
+    let state = record;
     if (record?.version === 3) {
       if (record.provider !== this.encryption.id) throw new ChatGPTError('storage_provider_mismatch', '请使用保存这些凭据的系统加密服务。');
       await this.#requireEncryption();
       try {
         const bytes = Buffer.from(record.ciphertext, 'base64');
         if (!bytes.length || bytes.toString('base64') !== record.ciphertext) throw invalid();
-        return checkState(JSON.parse(await this.encryption.decrypt(bytes)));
+        state = checkState(JSON.parse(await this.encryption.decrypt(bytes)));
       } catch {
         throw new ChatGPTError('storage_decryption_failed', '无法解密现有凭据。请检查钥匙串或 Windows 用户后重试。', true);
       }
+      if (!state.profiles.some(profile => profile.status === 'disconnected')) return state;
+    } else {
+      if (record?.version === 1) {
+        const id = randomUUID();
+        state = { ...newState(), activeProfileId: id, profiles: [{ ...record, id, label: 'Connection 1', requiresNewRegistration: true }] };
+      }
+      checkState(state);
     }
-    let state = record;
-    if (record?.version === 1) {
-      const id = randomUUID();
-      state = { ...newState(), activeProfileId: id, profiles: [{ ...record, id, label: 'Connection 1', requiresNewRegistration: true }] };
-    }
-    checkState(state);
+    // Earlier releases kept signed-out profiles for reconnection.
+    state.profiles = state.profiles.filter(profile => profile.status !== 'disconnected');
+    if (!state.profiles.some(profile => profile.id === state.activeProfileId)) delete state.activeProfileId;
     // Valid pre-encryption files are upgraded in place without making a plaintext backup.
     await save(state);
     return state;

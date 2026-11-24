@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { createChatGPT } from './chatgpt/client.js';
+import { createChatGPT, isAddingAccount } from './chatgpt/client.js';
 import { mountChatOptions } from './chat-options.js';
 import { createUsageStore, mountActivity } from './activity.js';
 import { createCredentialEncryption } from './credential-encryption.js';
@@ -56,17 +56,26 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
     return signedOutUnknownProfile || signedOutProfiles.has(profileId);
   }
 
+  function accountBlocked() {
+    return transition && !transition.preparing && !transition.addingAccount;
+  }
+
+  function invalidateAccount() {
+    account.abort();
+    account = new AbortController();
+  }
+
   function visibleSession(current) {
     if (!available || disposed) return disconnected;
     if (transition?.kind === 'disconnect') return { ...current, ...disconnected };
-    if (transition) return { ...current, status: 'connecting', sharing: false, error: undefined };
+    if (accountBlocked()) return { ...current, status: 'connecting', sharing: false, error: undefined };
     if (locallySignedOut(current.profileId)) return { ...current, ...disconnected };
     return current;
   }
 
   async function getSession() {
     const { signal: accountSignal } = account;
-    if (available && !disposed && !transition) {
+    if (available && !disposed && !accountBlocked()) {
       const current = await client.getSession();
       if (accountSignal.aborted) return { ...disconnected, accountSignal };
       session = current;
@@ -97,6 +106,9 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
   }
   // Refreshing or revoking a grant also updates the native model catalog.
   const unsubscribe = client.subscribe(current => {
+    if (transition?.addingAccount && session.profileId !== current.profileId) {
+      invalidateAccount();
+    }
     session = current;
     refreshCatalog(current);
   });
@@ -114,9 +126,8 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
     if (signingOutProfile || (previous && !(kind === 'disconnect' && previous.kind === 'sign-in'))) {
       throw pluginError('connection_busy', '请先完成或取消当前账号操作。');
     }
-    transition = { kind };
-    account.abort();
-    account = new AbortController();
+    transition = { kind, preparing: kind === 'sign-in' };
+    if (accountBlocked()) invalidateAccount();
     refreshCatalog(session);
     return { current: transition, previous };
   }
@@ -128,17 +139,27 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
   }
 
   async function signIn(request, reconsent) {
-    const options = await profileInput(request, { allowNew: !reconsent });
-    const source = !reconsent && (options.newProfile || options.profileId) ? await getSession() : undefined;
-    if (source?.accountSignal.aborted) throw pluginError('connection_busy', '账号已变更，请重试。');
+    request.signal.throwIfAborted();
     const { current: attempt } = beginTransition('sign-in');
-    if (source?.status === 'connected' && source.profileId && source.profileId !== options.profileId) {
-      attempt.addingFrom = source;
-    }
     const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, request.signal, lifetime.signal]);
     attempt.controller = controller;
     attempt.promise = (async () => {
+      const options = await profileInput(request, { allowNew: !reconsent });
+      controller.signal.throwIfAborted();
+      const source = !reconsent && (options.newProfile || options.profileId) ? await getSession() : undefined;
+      controller.signal.throwIfAborted();
+      if (source?.accountSignal.aborted) throw pluginError('connection_busy', '账号已变更，请重试。');
+      attempt.addingAccount = isAddingAccount(source, options);
+      attempt.preparing = false;
+      if (!attempt.addingAccount) {
+        invalidateAccount();
+        refreshCatalog(session);
+      }
+      // Adding an account belongs to the host so a reopened settings page can resume or cancel it.
+      const signals = [controller.signal, lifetime.signal];
+      if (!attempt.addingAccount) signals.push(request.signal);
+      const signal = AbortSignal.any(signals);
+      signal.throwIfAborted();
       if (!await credentialEncryption.isAvailable()) {
         throw pluginError('storage_encryption_unavailable', '无法访问系统凭据存储，请检查当前系统账号后重试。');
       }
@@ -146,7 +167,6 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
       session = await client.signIn({ ...options, signal, reconsent });
       signedOutUnknownProfile = false;
       signedOutProfiles.delete(session.profileId);
-      signal.throwIfAborted();
     })();
     try {
       await attempt.promise;
@@ -158,7 +178,7 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
   async function cancel() {
     const attempt = transition;
     if (attempt?.kind === 'sign-in') {
-      attempt.controller.abort();
+      attempt.controller.abort(pluginError('cancelled', '操作已取消。'));
       await attempt.promise.catch(() => undefined);
     }
   }
@@ -180,7 +200,7 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
     const { current, previous } = beginTransition('disconnect');
     try {
       if (previous) {
-        previous.controller.abort();
+        previous.controller.abort(pluginError('cancelled', '操作已取消。'));
         await previous.promise.catch(() => undefined);
       }
       await client.disconnect({ expectedProfileId: profileId });
@@ -206,8 +226,7 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
     const alreadySignedOut = signedOutProfiles.has(profileId);
     signedOutProfiles.add(profileId);
     if (session.profileId === profileId) {
-      account.abort();
-      account = new AbortController();
+      invalidateAccount();
       refreshCatalog(session);
     }
     try {
@@ -239,8 +258,7 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
       const current = await getSession();
       const saved = available && !disposed ? await client.listProfiles().catch(() => []) : [];
       if (!disposed && (current.accountSignal.aborted || pending !== transition)) continue;
-      const { status, sharing, error } = current;
-      const { identity, profileId, profileLabel } = pending?.addingFrom ?? current;
+      const { status, sharing, error, identity, profileId, profileLabel } = current;
       const profiles = saved.map(profile => {
         const signedOut = locallySignedOut(profile.id);
         return {
@@ -253,7 +271,7 @@ export function mountChatGPT(ctx, { client, available, credentialEncryption, pre
           requiresNewRegistration: profile.requiresNewRegistration,
         };
       });
-      return { status, sharing, available, addingAccount: Boolean(pending?.addingFrom), identity: publicIdentity(identity), profileId, profileLabel, profiles, features, error: error ? publicError(error) : undefined };
+      return { status, sharing, available, addingAccount: Boolean(pending?.addingAccount), identity: publicIdentity(identity), profileId, profileLabel, profiles, features, error: error ? publicError(error) : undefined };
     }
   }
 

@@ -38,11 +38,15 @@ async function fixture(t) {
   async function seal() {
     await write({ version: 3, provider: encryption.id, ciphertext: (await encryption.encrypt(JSON.stringify(state))).toString('base64') });
   }
+  async function readState() {
+    const envelope = JSON.parse(await readFile(file, 'utf8'));
+    return JSON.parse(await encryption.decrypt(Buffer.from(envelope.ciphertext, 'base64')));
+  }
   const config = { storageDir: directory, credentialEncryption: encryption, appName: 'Fixture', appId: 'fixture', redirectPort: 0 };
-  return { config, file, profile, state, write, seal };
+  return { config, file, profile, state, write, seal, readState };
 }
 
-test('upgrade resumes an encrypted account; concurrent runtimes rotate once and failed remote logout still removes local credentials', async t => {
+test('upgrade resumes an encrypted account; concurrent runtimes rotate once and failed remote logout still removes the local account', async t => {
   const fx = await fixture(t);
   await fx.seal();
   const hostId = 'urn:uuid:c36edcb6-7c38-44c9-81f2-7c903de474f8';
@@ -84,10 +88,35 @@ test('upgrade resumes an encrypted account; concurrent runtimes rotate once and 
   await assert.rejects(a.disconnect(), { code: 'revocation_failed' });
   assert.equal(revocations, 1);
   await assert.rejects(b.listModels(), { code: 'sign_in_required' });
-  const stored = JSON.parse(await readFile(fx.file, 'utf8'));
-  const { profiles } = JSON.parse(await fx.config.credentialEncryption.decrypt(Buffer.from(stored.ciphertext, 'base64')));
-  assert.equal(profiles[0].clientId, fx.profile.clientId);
-  for (const field of ['credentials', 'pendingRefresh', 'profileIdToken']) assert.equal(profiles[0][field], undefined);
+  const stored = await fx.readState();
+  assert.deepEqual(stored.profiles, []);
+  assert.equal(stored.activeProfileId, undefined);
+});
+
+test('upgrade removes saved signed-out rows while preserving connected accounts, expired grants, and pending sign-ins', async t => {
+  const fx = await fixture(t);
+  const signedOut = { ...fx.profile, id: 'signed-out', label: 'Connection 2', status: 'disconnected',
+    scopes: [], credentials: undefined, profileIdToken: undefined };
+  const expired = { ...signedOut, id: 'expired', label: 'Connection 3', status: 'reauth_required' };
+  const pending = { id: 'unfinished', label: 'Connection 4', clientId: 'oaiapp_pending', savedAt: fx.profile.savedAt };
+  fx.state.profiles.push(signedOut, expired);
+  fx.state.pendingRegistrations.push(pending);
+  await fx.seal();
+
+  const client = createChatGPT(fx.config);
+  const profiles = await client.listProfiles();
+  assert.deepEqual(profiles.map(profile => profile.id), [fx.profile.id, expired.id, pending.id]);
+  assert.equal(profiles[1].status, 'reauth_required');
+  assert.equal(profiles[2].pending, true);
+  assert.equal((await client.getSession()).profileId, fx.profile.id);
+  const stored = await fx.readState();
+  assert.deepEqual(stored.profiles.map(profile => profile.id), [fx.profile.id, expired.id]);
+  assert.deepEqual(stored.pendingRegistrations, [pending]);
+
+  fx.state.activeProfileId = signedOut.id;
+  await fx.write(fx.state);
+  assert.deepEqual(await createChatGPT(fx.config).getSession(), { status: 'disconnected', sharing: false });
+  assert.equal((await fx.readState()).activeProfileId, undefined);
 });
 
 test('readable old plaintext is encrypted before use; unknown or unreadable credentials are preserved exactly', async t => {
@@ -155,15 +184,11 @@ test('a rotated grant survives a signing-key outage and a restart without reusin
   });
   const client = createChatGPT(fx.config);
   await assert.rejects(client.listModels(), { code: 'identity_verification_unavailable' });
-  const readProfile = async () => {
-    const envelope = JSON.parse(await readFile(fx.file, 'utf8'));
-    return JSON.parse(await fx.config.credentialEncryption.decrypt(Buffer.from(envelope.ciphertext, 'base64'))).profiles[0];
-  };
-  assert.equal((await readProfile()).pendingRefresh.credentials.refreshToken, 'pending-refresh');
+  assert.equal((await fx.readState()).profiles[0].pendingRefresh.credentials.refreshToken, 'pending-refresh');
   ready = true;
   await createChatGPT(fx.config).listModels();
   assert.equal(exchanges, 1);
-  const profile = await readProfile();
+  const [profile] = (await fx.readState()).profiles;
   assert.equal(profile.pendingRefresh, undefined);
   assert.equal(profile.credentials.refreshToken, 'pending-refresh');
 });

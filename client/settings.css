@@ -69,7 +69,6 @@ body[data-ds-dark-theme] .dsh-use-chatgpt-page { --cg-allowed: #9ad5b0; }
 .cg-account-action:hover:enabled, .cg-account-add:hover:enabled,
 .cg-account-more:hover:enabled, .cg-account-more[aria-expanded=true] { color: var(--cg-ink); background: var(--cg-wash); }
 .cg-account-flow { display: grid; gap: 12px; justify-items: start; padding: 16px 0; }
-.cg-account-flow h3 { margin: 0 0 4px; font-size: 15px; font-weight: 550; }
 .cg-account-flow p { margin: 0; color: var(--cg-muted); }
 .dsh-use-chatgpt-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .dsh-use-chatgpt-actions:empty { display: none; }

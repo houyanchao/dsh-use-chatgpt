@@ -67,12 +67,14 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   const browserAttempts = [];
   let callbackServer;
   let leaveStreamOpen = false;
+  let openStreamSignal;
   let nextEvents;
   let browserPaused;
   let refuseIdentity = false;
   let omitPlanGrant = false;
   let imagePaused;
   let revocationStatus = 200;
+  let registrationClientId = CLIENT_ID;
 
   // Deliver the callback to the DevKit's real handler without binding a socket.
   t.mock.method(Server.prototype, 'listen', function (options, onListening) {
@@ -123,6 +125,7 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
         ];
         nextEvents = undefined;
         if (leaveStreamOpen) {
+          openStreamSignal = request.signal;
           return new Response(new ReadableStream({
             start(controller) {
               controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(events[0])}\n\n`));
@@ -156,8 +159,7 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
       callback.searchParams.set('state', authorization.searchParams.get('state'));
       callback.searchParams.set('code', `synthetic-code-${browserAttempts.length}`);
       const clientId = authorization.searchParams.get('client_id');
-      callback.searchParams.set('client_id', clientId === 'dynamic_agent_client'
-        ? browserAttempts.length === 1 ? CLIENT_ID : SECOND_CLIENT_ID : clientId);
+      callback.searchParams.set('client_id', clientId === 'dynamic_agent_client' ? registrationClientId : clientId);
       const approve = () => assert.equal(callbackServer.emit('request', {
         method: 'GET', headers: { host: callback.host }, url: `${callback.pathname}${callback.search}`,
       }, { setHeader() {}, end() {} }), true);
@@ -169,12 +171,13 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   const routes = new Map();
   let adapter;
   let providers;
+  let catalogChanges = 0;
   const cleanups = [];
   mountChatGPT({
     llm: { registerAdapter(ids, impl) {
       providers = ids;
       adapter = impl;
-      return { replace(next) { providers = next; } };
+      return { replace(next) { providers = next; catalogChanges++; } };
     } },
     get(key) {
       if (key === 'attachments') return {
@@ -193,11 +196,11 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   }, { client, credentialEncryption, available: true });
   t.after(() => cleanups.forEach(cleanup => cleanup()));
 
-  async function accountResult(action, body) {
+  async function accountResult(action, body, signal) {
     const path = `/api/dsh-use-chatgpt/${action}`;
     const { methods, fetch } = routes.get(path);
     const response = await fetch(new Request(`http://127.0.0.1${path}`, {
-      method: methods[0], ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      method: methods[0], signal, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }));
     return { status: response.status, state: await response.json() };
   }
@@ -364,8 +367,7 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   const signedOut = await account('disconnect');
   assert.deepEqual(signedOut, {
     status: 'disconnected', sharing: false, available: true, addingAccount: false, features: defaultFeatures,
-    profileId: authorized.profileId, profileLabel: authorized.profileLabel, identity: authorized.identity,
-    profiles: [{ ...authorized.profiles[0], status: 'disconnected', sharing: false }],
+    profiles: [],
   });
   assert.deepEqual(providers, []);
   assert.equal((await inFlight.next()).value.reason.kind, 'aborted');
@@ -386,38 +388,67 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   await assert.rejects(createChatGPT(config).streamResponse(response), { code: 'sign_in_required' });
   assert.equal(calls.length, afterDisconnect);
 
-  const firstId = authorized.profileId;
+  assert.equal((await accountResult('sign-in', { profileId: authorized.profileId })).state.error.code, 'profile_not_found');
+  registrationClientId = SECOND_CLIENT_ID;
   const second = await account('sign-in', { newProfile: true });
   const secondId = second.profileId;
-  assert.notEqual(secondId, firstId);
+  assert.notEqual(secondId, authorized.profileId);
   assert.deepEqual(second.identity, { email: 'second@example.invalid' });
   assert.equal(second.sharing, false);
   assert.deepEqual(second.profiles.map(({ id, sharing, status }) => ({ id, sharing, status })), [
-    { id: firstId, sharing: false, status: 'disconnected' },
     { id: secondId, sharing: false, status: 'connected' },
   ]);
   assert.equal(browserAttempts.at(-1).searchParams.get('client_id'), 'dynamic_agent_client');
-  const first = await account('sign-in', { profileId: firstId });
-  assert.equal(first.profileId, firstId);
+  registrationClientId = CLIENT_ID;
+  const first = await account('sign-in', { newProfile: true });
+  const firstId = first.profileId;
+  assert.notEqual(firstId, authorized.profileId);
+  assert.deepEqual(first.identity, authorized.identity);
   assert.equal(first.sharing, true);
-  assert.equal(browserAttempts.at(-1).searchParams.get('client_id'), CLIENT_ID);
+  assert.equal(browserAttempts.at(-1).searchParams.get('client_id'), 'dynamic_agent_client');
   assert.equal((await accountResult('sign-in', { profileId: firstId, newProfile: true })).status, 400);
 
+  const browserCount = browserAttempts.length;
+  const readingBody = Promise.withResolvers();
+  const finishReading = Promise.withResolvers();
+  t.mock.method(Request.prototype, 'json', () => {
+    readingBody.resolve();
+    return finishReading.promise;
+  }, { times: 1 });
+  const preparingAdd = accountResult('sign-in', { newProfile: true });
+  await readingBody.promise;
+  const earlyCancel = account('cancel');
+  finishReading.resolve({ newProfile: true });
+  assert.equal((await preparingAdd).state.error.code, 'cancelled');
+  const afterEarlyCancel = await earlyCancel;
+  assert.equal(browserAttempts.length, browserCount);
+  assert.equal(afterEarlyCancel.profileId, firstId);
+  assert.equal(afterEarlyCancel.sharing, true);
+  assert.equal(afterEarlyCancel.addingAccount, false);
+
+  registrationClientId = SECOND_CLIENT_ID;
+  const duringCancel = adapter.stream(options);
+  assert.equal((await duringCancel.next()).value.type, 'block-start');
+  assert.equal((await duringCancel.next()).value.type, 'text-delta');
+  leaveStreamOpen = false;
+  const beforeAddChanges = catalogChanges;
   browserPaused = Promise.withResolvers();
-  const ongoingLogin = accountResult('sign-in', { newProfile: true });
+  const settingsRequest = new AbortController();
+  const ongoingLogin = accountResult('sign-in', { newProfile: true }, settingsRequest.signal);
   await browserPaused.promise;
+  settingsRequest.abort();
   const adding = await account('status');
-  assert.equal(adding.status, 'connecting');
+  assert.equal(adding.status, 'connected');
   assert.equal(adding.addingAccount, true);
-  assert.equal(adding.sharing, false);
+  assert.equal(adding.sharing, true);
   assert.equal(adding.profileId, firstId);
   assert.deepEqual(adding.identity, first.identity);
   assert.equal(adding.profiles.find(profile => profile.id === firstId).sharing, true);
-  assert.deepEqual(providers, []);
-  const beforeBlockedRequest = calls.length;
-  assert.deepEqual(await adapter.listModels(), []);
-  assert.equal((await Array.fromAsync(adapter.stream(options))).at(-1).reason.failure.code, 'sharing_not_enabled');
-  assert.equal(calls.length, beforeBlockedRequest);
+  assert.deepEqual(providers, [providerId]);
+  assert.equal(openStreamSignal.aborted, false);
+  assert.deepEqual(await adapter.listModels(), models);
+  assert.equal((await Array.fromAsync(adapter.stream(options))).at(-1).reason.kind, 'stop');
+  assert.equal(calls.at(-1).authorization, 'Bearer synthetic-access-4');
   assert.equal((await accountResult('select-profile', { profileId: secondId })).status, 409);
   assert.equal((await accountResult('sign-out-profile', { profileId: secondId })).status, 409);
   const cancelled = await account('cancel');
@@ -427,6 +458,8 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   assert.equal((await ongoingLogin).state.error.code, 'cancelled');
   browserPaused = undefined;
   assert.deepEqual(providers, [providerId]);
+  assert.equal(catalogChanges, beforeAddChanges);
+  assert.equal(openStreamSignal.aborted, false);
 
   imagePaused = { entered: Promise.withResolvers(), release: Promise.withResolvers() };
   const stale = adapter.stream(visionOptions);
@@ -437,6 +470,8 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   assert.equal(identityAgain.profileId, secondId);
   assert.equal(identityAgain.sharing, false);
   assert.deepEqual(providers, []);
+  assert.equal(openStreamSignal.aborted, true);
+  assert.equal((await duringCancel.next()).value.reason.kind, 'aborted');
   imagePaused.release.resolve();
   assert.equal((await pending).value.reason.kind, 'aborted');
   assert.equal((await stale.next()).done, true);
@@ -446,7 +481,6 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   assert.equal(secondAuthorized.profileId, secondId);
   assert.equal(secondAuthorized.sharing, true);
   assert.equal(browserAttempts.at(-1).searchParams.get('client_id'), SECOND_CLIENT_ID);
-  leaveStreamOpen = false;
   assert.equal((await Array.fromAsync(adapter.stream(toolContinuation))).at(-1).reason.kind, 'stop');
   assert.deepEqual(JSON.parse(calls.at(-1).body).input.slice(1), [
     { type: call.type, call_id: call.call_id, namespace: call.namespace, name: call.name, arguments: call.arguments },
@@ -454,7 +488,9 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   ]);
   await adapter.listModels();
   assert.equal(calls.at(-1).authorization, 'Bearer synthetic-access-6');
-  await account('disconnect');
+  const secondSignedOut = await account('disconnect');
+  assert.equal(secondSignedOut.profileId, undefined);
+  assert.deepEqual(secondSignedOut.profiles.map(profile => profile.id), [firstId]);
   assert.deepEqual(Object.fromEntries(new URLSearchParams(calls.at(-1).body)), {
     token: 'synthetic-refresh-6', token_type_hint: 'refresh_token', client_id: SECOND_CLIENT_ID,
   });
@@ -462,17 +498,22 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   assert.equal(recovered.sharing, true);
   await adapter.listModels();
   assert.equal(calls.at(-1).authorization, 'Bearer synthetic-access-4');
-  assert.deepEqual(recovered.profiles.map(({ id, status, sharing }) => ({ id, status, sharing })).sort((a, b) => a.id.localeCompare(b.id)), [
+  assert.deepEqual(recovered.profiles.map(({ id, status, sharing }) => ({ id, status, sharing })), [
     { id: firstId, status: 'connected', sharing: true },
-    { id: secondId, status: 'disconnected', sharing: false },
-  ].sort((a, b) => a.id.localeCompare(b.id)));
+  ]);
 
+  leaveStreamOpen = true;
+  const duringRetry = adapter.stream(options);
+  assert.equal((await duringRetry.next()).value.type, 'block-start');
+  assert.equal((await duringRetry.next()).value.type, 'text-delta');
+  leaveStreamOpen = false;
   refuseIdentity = true;
   assert.equal((await accountResult('sign-in', { newProfile: true })).state.error.code, 'invalid_id_token');
   const afterFailure = await account('status');
   assert.equal(afterFailure.profileId, firstId);
   assert.equal(afterFailure.sharing, true);
   assert.equal(afterFailure.addingAccount, false);
+  assert.equal(openStreamSignal.aborted, false);
   const unfinished = afterFailure.profiles.find(profile => profile.pending);
   assert.ok(unfinished);
 
@@ -485,8 +526,14 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   const resumed = account('sign-in', { profileId: unfinished.id });
   const approveResumed = await browserPaused.promise;
   const resuming = await account('status');
+  assert.equal(resuming.status, 'connected');
   assert.equal(resuming.addingAccount, true);
   assert.equal(resuming.profileId, firstId);
+  assert.equal(resuming.sharing, true);
+  assert.deepEqual(providers, [providerId]);
+  assert.deepEqual(await adapter.listPlanModels(true), models);
+  assert.equal(calls.at(-1).authorization, 'Bearer synthetic-access-4');
+  assert.equal(openStreamSignal.aborted, false);
   approveResumed();
   const added = await resumed;
   browserPaused = undefined;
@@ -495,6 +542,8 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   assert.equal(added.profileId, unfinished.id);
   assert.equal(added.sharing, false);
   assert.deepEqual(providers, []);
+  assert.equal(openStreamSignal.aborted, true);
+  assert.equal((await duringRetry.next()).value.reason.kind, 'aborted');
   // Another process still displays A after this registration made B active.
   const beforeStaleLogout = calls.length;
   await assert.rejects(otherProcess.disconnect({ expectedProfileId: previouslySelected }), { code: 'connection_changed' });
@@ -512,18 +561,21 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   await imagePaused.entered.promise;
   const afterOtherSignOut = await account('sign-out-profile', { profileId: added.profileId });
   assert.equal(afterOtherSignOut.profileId, firstId);
-  assert.equal(afterOtherSignOut.profiles.find(profile => profile.id === added.profileId).status, 'disconnected');
+  assert.deepEqual(afterOtherSignOut.profiles.map(profile => profile.id), [firstId]);
   assert.equal(new URLSearchParams(calls.at(-1).body).get('client_id'), SECOND_CLIENT_ID);
   imagePaused.release.resolve();
   assert.equal((await streamA).at(-1).reason.kind, 'stop');
   assert.equal(calls.at(-1).authorization, 'Bearer synthetic-access-4');
 
   // A failed remote revocation must still save the local sign-out and select A atomically.
-  assert.equal((await account('sign-in', { profileId: added.profileId })).profileId, added.profileId);
+  const readded = await account('sign-in', { newProfile: true });
+  assert.notEqual(readded.profileId, added.profileId);
   revocationStatus = 400;
-  assert.equal((await accountResult('sign-out-profile', { profileId: added.profileId })).state.error.code, 'revocation_failed');
+  assert.equal((await accountResult('sign-out-profile', { profileId: readded.profileId })).state.error.code, 'revocation_failed');
   assert.equal((await createChatGPT(config).getSession()).profileId, firstId);
-  assert.equal((await account('status')).sharing, true);
+  const remaining = await account('status');
+  assert.equal(remaining.sharing, true);
+  assert.deepEqual(remaining.profiles.map(profile => profile.id), [firstId]);
   assert.deepEqual(providers, [providerId]);
 
   revocationStatus = 200;
@@ -531,8 +583,28 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
   const lastStream = adapter.stream(options);
   assert.equal((await lastStream.next()).value.type, 'block-start');
   assert.equal((await lastStream.next()).value.type, 'text-delta');
+
+  const deadline = new AbortController();
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  const timeout = t.mock.method(AbortSignal, 'timeout', ms => ms === 60_000 ? deadline.signal : realTimeout(ms));
+  browserPaused = Promise.withResolvers();
+  const timedOut = accountResult('sign-in', { newProfile: true });
+  await browserPaused.promise;
+  assert.ok(timeout.mock.calls.some(call => call.arguments[0] === 60_000));
+  deadline.abort(new DOMException('Authorization timed out', 'TimeoutError'));
+  assert.equal((await timedOut).state.error.code, 'authorization_timeout');
+  timeout.mock.restore();
+  browserPaused = undefined;
+  const afterTimeout = await account('status');
+  assert.equal(afterTimeout.profileId, firstId);
+  assert.equal(afterTimeout.sharing, true);
+  assert.equal(afterTimeout.addingAccount, false);
+  assert.equal(openStreamSignal.aborted, false);
+
   const last = await account('sign-out-profile', { profileId: firstId });
   assert.equal(last.status, 'disconnected');
+  assert.equal(last.profileId, undefined);
+  assert.deepEqual(last.profiles, []);
   assert.equal((await lastStream.next()).value.reason.kind, 'aborted');
   assert.deepEqual(providers, []);
   await assert.rejects(createChatGPT(config).listModels(), { code: 'sign_in_required' });
