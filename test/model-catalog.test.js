@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createUsageStore } from '../host/activity.js';
+import { ChatGPTError } from '../host/chatgpt/errors.js';
 import { mountChatGPT } from '../host/index.js';
 import { createProvider } from '../host/provider.js';
 
@@ -119,6 +120,50 @@ test('manual refresh bypasses a warm catalog once and still checks account autho
   sharing = false;
   assert.deepEqual(await provider.listPlanModels(true), []);
   assert.equal(reads, 2);
+});
+
+test('catalog connection errors are quiet in the native picker and actionable in the plugin', async t => {
+  const networkError = new ChatGPTError('network_error', '无法连接 OpenAI，请检查网络后重试。', true);
+  const routes = new Map();
+  const notifications = [];
+  const session = { profileId: 'alpha', status: 'connected', sharing: true };
+  let adapter;
+  let offline = true;
+  mountChatGPT({
+    llm: { registerAdapter(_ids, implementation) {
+      adapter = implementation;
+      return { replace(ids) { notifications.push(ids); } };
+    } },
+    connection: { fetch: { register(route) { routes.set(route.path, route); } } },
+    effect(setup) { t.after(setup()); },
+  }, {
+    available: true,
+    client: {
+      subscribe: () => () => {},
+      getSession: async () => session,
+      async listModels() {
+        if (offline) throw networkError;
+        return [{ slug: 'chat-model', displayName: 'Chat model' }];
+      },
+    },
+  });
+
+  const path = '/api/dsh-use-chatgpt/models';
+  const retry = () => routes.get(path).fetch(new Request('http://localhost' + path + '?profileId=alpha&refresh=1'));
+  assert.deepEqual(await adapter.listModels(), []);
+  await assert.rejects(adapter.listSelectableModels(), { code: 'network_error' });
+  await assert.rejects(adapter.prepareCall('chatgpt-plan', 'chat-model'), { code: 'network_error' });
+  const failed = await retry();
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: { message: networkError.message } });
+  assert.deepEqual(notifications, []);
+
+  offline = false;
+  const recovered = await retry();
+  assert.equal(recovered.status, 200);
+  assert.deepEqual((await recovered.json()).models.map(model => model.id), ['chat-model']);
+  assert.deepEqual(notifications, [['chatgpt-plan']]);
+  assert.deepEqual((await adapter.listModels()).map(model => model.id), ['chat-model']);
 });
 
 test('picker visibility persists per account while the complete catalog and existing routes remain usable', async t => {

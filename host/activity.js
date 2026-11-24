@@ -26,7 +26,8 @@ async function modelCatalog({ adapter, getSession, usageStore, onCatalogChange }
     || typeof body.enabled !== 'boolean')) return fail('无效的模型显示设置。', 400);
   const expected = writing ? body.profileId : params.get('profileId');
   if (expected !== null && expected !== profileId) return fail('当前 ChatGPT 账号已更改，请刷新重试。', 409);
-  const models = await adapter.listPlanModels(!writing && params.get('refresh') === '1');
+  const refreshing = !writing && params.get('refresh') === '1';
+  const models = await adapter.listPlanModels(refreshing);
   const current = await getSession();
   request.signal?.throwIfAborted();
   accountSignal?.throwIfAborted();
@@ -40,6 +41,7 @@ async function modelCatalog({ adapter, getSession, usageStore, onCatalogChange }
     return json({ model: body.model, enabled: body.enabled });
   }
   const hidden = usageStore.hiddenModels(profileId);
+  if (refreshing) onCatalogChange();
   return json({ models: models.map(model => ({ ...model, enabled: !hidden.has(model.id) })) });
 }
 
@@ -61,7 +63,7 @@ async function selectChatModel(ctx, { adapter, getSession, usageStore }, request
   const agent = agents?.get(sessionId);
   if (!agent) return fail('DSH 会话未打开，请重新选择会话。', 409);
 
-  const available = (await adapter.listModels()).find(entry => entry.id === model);
+  const available = (await adapter.listSelectableModels()).find(entry => entry.id === model);
   signal.throwIfAborted();
   if (!available || (reasoningEffort !== undefined && !available.reasoning?.efforts.some(effort => effort.id === reasoningEffort))) {
     return fail('当前 ChatGPT 账号不支持此模型或推理强度。', 400);

@@ -105,8 +105,8 @@ export function ModelCatalog({ t, language, resource, profileId }) {
       </button>
     </header>
     <p className="cg-catalog-hint">{words.hint}</p>
-    {error && <p role="alert" className="dsh-use-chatgpt-error">{t('modelsFailed')}</p>}
-    {!error && !models?.length && <p role="status">{t(models ? 'modelsEmpty' : 'modelsLoading')}</p>}
+    {error !== null && <p role="alert" className="dsh-use-chatgpt-error">{error || t('modelsFailed')}</p>}
+    {error === null && !models?.length && <p role="status">{t(models ? 'modelsEmpty' : 'modelsLoading')}</p>}
     {models?.length > 0 && <ul className="cg-model-list" aria-labelledby={heading}>
       {models.map(model => <ModelRow key={model.id} model={model} words={words} joiner={language === 'en' ? ', ' : '、'}
         disabled={!profileId || refreshing} status={status.get(model.id)} onChange={changeVisibility} />)}

@@ -216,7 +216,7 @@ test('sidebar model selection updates only the live session of the active grant'
   }, {
     usageStore: store,
     async getSession() { return { status: 'connected', sharing: true, profileId: alpha, accountSignal: account.signal }; },
-    adapter: { async listModels() {
+    adapter: { async listSelectableModels() {
       catalogCalls += 1;
       return [{ id: 'gpt-chat', reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }];
     } },

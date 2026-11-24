@@ -347,7 +347,7 @@ function Account({ t, state, adding }) {
 
 function usePageResource(read) {
   const [data, setData] = useState(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState(null);
   const [revision, setRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(() => { setRevision(value => value + 1); }, []);
@@ -355,7 +355,7 @@ function usePageResource(read) {
   useEffect(() => {
     if (!read) {
       setData(null);
-      setError(false);
+      setError(null);
       return;
     }
     const controller = new AbortController();
@@ -366,10 +366,10 @@ function usePageResource(read) {
         const result = await read(signal, revision > 0);
         if (!signal.aborted) {
           setData(result);
-          setError(false);
+          setError(null);
         }
-      } catch {
-        if (!signal.aborted) setError(true);
+      } catch (failure) {
+        if (!signal.aborted) setError(typeof failure?.message === 'string' ? failure.message : '');
       } finally {
         if (!signal.aborted) setRefreshing(false);
       }

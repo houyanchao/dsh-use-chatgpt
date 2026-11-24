@@ -219,6 +219,14 @@ export function createProvider(client, getSession, lifetime, {
     return entries.find(entry => entry.id === model) ?? modelInfo(model);
   }
 
+  async function listVisibleModels(session) {
+    const models = await loadModels(session, false);
+    session.accountSignal?.throwIfAborted();
+    if (!session.profileId || models.length === 0) return models;
+    const hidden = getHiddenModels(session.profileId);
+    return models.filter(model => !hidden.has(model.id));
+  }
+
   return {
     providerInfo: id => ({ id, name: 'ChatGPT 套餐' }),
     providerRetryPolicy: () => undefined,
@@ -230,11 +238,17 @@ export function createProvider(client, getSession, lifetime, {
     }),
     async listModels() {
       const session = await getSession();
-      const models = await loadModels(session, false);
-      session.accountSignal?.throwIfAborted();
-      if (!session.profileId || models.length === 0) return models;
-      const hidden = getHiddenModels(session.profileId);
-      return models.filter(model => !hidden.has(model.id));
+      try {
+        return await listVisibleModels(session);
+      } catch (error) {
+        if (error?.code !== 'network_error') throw error;
+        lifetime.throwIfAborted();
+        session.accountSignal?.throwIfAborted();
+        return [];
+      }
+    },
+    async listSelectableModels() {
+      return listVisibleModels(await getSession());
     },
     async listPlanModels(force = false) {
       return loadModels(await getSession(), force);
