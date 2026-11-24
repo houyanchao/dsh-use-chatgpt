@@ -2,6 +2,8 @@
 
 在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。当前支持本机 macOS 和 Windows。
 
+![DeepSeek Harness 的「关联 ChatGPT」设置页，展示当前账号和可用模型列表](docs/images/chatgpt-settings.png)
+
 ## 开始使用
 
 1. 打开侧边栏的「关联ChatGPT」，点击「使用 ChatGPT 登录」，在浏览器中完成授权。
