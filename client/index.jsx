@@ -4,6 +4,8 @@ import manifest from '../package.json' with { type: 'json' };
 import { PanelIcon } from './PanelIcon.jsx';
 import searchStyles from './native-chat-options.css';
 import { ModelCatalog } from './ModelCatalog.jsx';
+import { PluginRecommendations } from './PluginRecommendations.jsx';
+import { createPluginInstaller } from './plugin-installer.js';
 import { registerNativeChatOptions } from './NativeChatOptions.jsx';
 import { ChatGPTMark } from './ChatGPTMark.jsx';
 import sidebarStyles from './sidebar.css';
@@ -51,6 +53,15 @@ const dictionaries = {
     modelsFailed: '无法读取模型列表。',
     refreshModels: '刷新模型列表',
     updateTitle: '有新版本', updateDetails: '查看更新', updateBadge: '更新',
+    otherPlugins: '作者的其他插件',
+    freeModelsDescription: '在 DSH 中使用 Kilo 免费模型，检测可用性并选择在对话中显示的模型。',
+    timelineDescription: '为 DSH 对话添加提问时间轴、收藏夹、提示词库和多格式导出。',
+    browserDescription: '为 ChatGPT、Gemini、DeepSeek 等网页添加对话时间轴、收藏夹和提示词库。',
+    installPlugin: '安装', installedPlugin: '已安装', installingPlugin: '安装中…',
+    checkingPlugins: '检测中…', retryPlugins: '重新检测', installUnavailable: '安装不可用',
+    pluginAction: '{name} · {action}', chromeStore: 'Chrome 版', edgeStore: 'Edge 版',
+    inventoryError: '无法读取已安装插件，请重新检测。', installError: '安装失败，请重试。',
+    packageNotFound: 'npm 官方源暂未找到 {name}。', installGuide: '查看安装说明',
   },
   en: {
     webSearch: 'Web search', searchHelp: 'Allow ChatGPT to search the web when needed in this conversation',
@@ -88,6 +99,15 @@ const dictionaries = {
     modelsFailed: 'Could not load the model list.',
     refreshModels: 'Reload models',
     updateTitle: 'Update available', updateDetails: 'View update', updateBadge: 'Update',
+    otherPlugins: 'More plugins by this author',
+    freeModelsDescription: 'Use free Kilo models in DSH, check availability, and choose which models appear in chat.',
+    timelineDescription: 'Add a question timeline, bookmark folders, a prompt library, and chat exports to DSH.',
+    browserDescription: 'Add a chat timeline, bookmarks, and a prompt library to ChatGPT, Gemini, DeepSeek, and other AI chat sites.',
+    installPlugin: 'Install', installedPlugin: 'Installed', installingPlugin: 'Installing…',
+    checkingPlugins: 'Checking…', retryPlugins: 'Check again', installUnavailable: 'Install unavailable',
+    pluginAction: '{name} · {action}', chromeStore: 'Chrome', edgeStore: 'Edge',
+    inventoryError: 'Could not load installed plugins. Check again.', installError: 'Installation failed. Try again.',
+    packageNotFound: 'The npm registry could not find {name}.', installGuide: 'View installation guide',
   },
 };
 
@@ -456,7 +476,7 @@ function PluginVersion({ t, data, loginFooter = false }) {
   </Wrapper>;
 }
 
-function WorkspaceBody({ t, language, state }) {
+function WorkspaceBody({ t, language, state, installer }) {
   const { connection, pending, run } = state;
   const authorized = connection.status === 'connected' && connection.sharing;
   const profileId = connection?.profileId;
@@ -473,10 +493,11 @@ function WorkspaceBody({ t, language, state }) {
           }}>{t('resetDefaults')}</Button>
         </details>}
     </>}
+    <PluginRecommendations installer={installer} t={t} />
   </div>;
 }
 
-function ChatGPTPage({ ctx, t, updates }) {
+function ChatGPTPage({ ctx, t, updates, installer }) {
   const titleId = useId();
   const state = useConnection();
   const { connection, pending, error, run, dismissError } = state;
@@ -512,7 +533,7 @@ function ChatGPTPage({ ctx, t, updates }) {
         <p>{t('subtitle')}</p>
       </header>}
       {signedIn
-        ? <WorkspaceBody key={connection.profileId} t={t} language={language} state={state} />
+        ? <WorkspaceBody key={connection.profileId} t={t} language={language} state={state} installer={installer} />
         : <LoginScreen t={t} state={state} />}
       {!signedIn && <PluginVersion t={t} data={version} loginFooter />}
     </div>
@@ -540,6 +561,7 @@ export const inject = ['locale', 'slots'];
 
 export function apply(ctx) {
   const updates = monitorUpdates(ctx);
+  const installer = createPluginInstaller(ctx);
   const t = ctx.locale.bind(pluginId);
   registerNativeChatOptions(ctx, useConnection);
   ctx.effect(() => ctx.locale.register(pluginId, dictionaries), `${pluginId} translations`);
@@ -560,5 +582,5 @@ export function apply(ctx) {
     name: 'main',
     key: pluginId,
     locale: pluginId,
-  }, function Panel(props) { return <ChatGPTPage {...props} ctx={ctx} updates={updates} />; }));
+  }, function Panel(props) { return <ChatGPTPage {...props} ctx={ctx} updates={updates} installer={installer} />; }));
 }
