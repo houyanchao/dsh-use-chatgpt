@@ -20,12 +20,12 @@ body[data-ds-dark-theme] .dsh-use-chatgpt-mark[data-tone="auto"] .dsh-chatgpt-li
   display: block;
 }
 
-/* The host's trailing slot normally aligns counters to the far edge. Keep the
-   update badge beside the panel name, including while the unpin button shows. */
-button[aria-describedby] > span[id]:has(.dsh-use-chatgpt-update-badge) {
-  margin-inline-start: 0;
-  min-width: 0;
-  opacity: 1;
+.dsh-use-chatgpt-update-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-primary, currentColor);
 }
 
 .dsh-use-chatgpt-update-sr {

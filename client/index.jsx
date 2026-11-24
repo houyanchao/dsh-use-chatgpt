@@ -50,10 +50,7 @@ const dictionaries = {
     modelsEmpty: '此账号暂时没有可用的 ChatGPT 套餐模型。',
     modelsFailed: '无法读取模型列表。',
     refreshModels: '刷新模型列表',
-    updateDetails: '查看升级详情', updateBadge: '有新版本',
-    pluginDetails: '插件详情',
-    updateAvailable: '可更新至 {version}',
-    pluginDetailsFallback: '在「设置 → 插件」中搜索 dsh-use-chatgpt 查看详情。',
+    updateTitle: '有新版本', updateDetails: '查看更新', updateBadge: '更新',
   },
   en: {
     webSearch: 'Web search', searchHelp: 'Allow ChatGPT to search the web when needed in this conversation',
@@ -90,10 +87,7 @@ const dictionaries = {
     modelsEmpty: 'This account currently has no available ChatGPT plan models.',
     modelsFailed: 'Could not load the model list.',
     refreshModels: 'Reload models',
-    updateDetails: 'View upgrade details', updateBadge: 'Update available',
-    pluginDetails: 'Plugin details',
-    updateAvailable: 'Update to {version} available',
-    pluginDetailsFallback: 'Search for dsh-use-chatgpt under Settings → Plugins to view details.',
+    updateTitle: 'Update available', updateDetails: 'View update', updateBadge: 'Update',
   },
 };
 
@@ -436,19 +430,29 @@ async function readModels(profileId, signal, force) {
   return data.models.filter(model => typeof model?.id === 'string' && typeof model.name === 'string');
 }
 
-function PluginVersion({ ctx, t, data, loginFooter = false }) {
-  const [fallback, setFallback] = useState(false);
-  const hasUpdate = data?.status === 'update_available';
+function UpdateBanner({ ctx, t, data }) {
+  if (data?.status !== 'update_available') return null;
+
+  function openDetails(event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (openPluginDetails(ctx)) event.preventDefault();
+  }
+
+  return <div className="cg-update-banner">
+    <p className="cg-update-copy">
+      <strong>{t('updateTitle')}</strong>
+      <span>v{data.latestVersion}</span>
+    </p>
+    <a className="cg-update-action" href={`https://www.npmjs.com/package/${manifest.name}`}
+      target="_blank" rel="noopener noreferrer" onClick={openDetails}>{t('updateDetails')}</a>
+  </div>;
+}
+
+function PluginVersion({ t, data, loginFooter = false }) {
   const version = 'v' + (data?.currentVersion ?? manifest.version);
   const Wrapper = loginFooter ? 'footer' : 'div';
   return <Wrapper className={loginFooter ? 'cg-login-footer' : 'cg-header-version'}>
-    {hasUpdate ? <button type="button" className="cg-version" onClick={() => setFallback(!openPluginDetails(ctx))}
-      title={t('updateAvailable', { version: data.latestVersion })}
-      aria-label={`${version} · ${t('updateBadge')} · ${t('updateDetails')}`}>
-      {loginFooter && t('pluginDetails')}<span>{version}</span>
-      <span className="dsh-use-chatgpt-update-badge">{t('updateBadge')}</span>
-    </button> : <span className="cg-version">{loginFooter && t('version')}<span>{version}</span></span>}
-    {hasUpdate && fallback && <small role="status">{t('pluginDetailsFallback')}</small>}
+    <span className="cg-version">{loginFooter && t('version')}<span>{version}</span></span>
   </Wrapper>;
 }
 
@@ -491,10 +495,11 @@ function ChatGPTPage({ ctx, t, updates }) {
   useEffect(updates.refresh, [updates]);
   return <section className="dsh-use-chatgpt-page" aria-label={signedIn ? undefined : t('title')} aria-labelledby={signedIn ? titleId : undefined}>
     <div className={signedIn ? 'dsh-use-chatgpt-content' : 'cg-login-layout'} inert={dialogOpen ? '' : undefined}>
+      <UpdateBanner ctx={ctx} t={t} data={version} />
       {signedIn && <header className="dsh-use-chatgpt-header">
         <h1 id={titleId}>{t('title')}</h1>
         <div className="cg-header-links">
-          <PluginVersion ctx={ctx} t={t} data={version} />
+          <PluginVersion t={t} data={version} />
           <Tooltip label={t('viewProject')}>
             <a className="cg-project-link" href="https://github.com/houyanchao/dsh-use-chatgpt"
               target="_blank" rel="noopener noreferrer" aria-label={t('viewProject')}>
@@ -509,7 +514,7 @@ function ChatGPTPage({ ctx, t, updates }) {
       {signedIn
         ? <WorkspaceBody key={connection.profileId} t={t} language={language} state={state} />
         : <LoginScreen t={t} state={state} />}
-      {!signedIn && <PluginVersion ctx={ctx} t={t} data={version} loginFooter />}
+      {!signedIn && <PluginVersion t={t} data={version} loginFooter />}
     </div>
     <Modal open={dialogOpen} title={t(dialogError ? 'authorizationFailed' : 'browserTitle')}
       description={dialogError ? dialogError.message || t('requestFailed') : t('authorizeHint')}
@@ -527,7 +532,8 @@ function SidebarIcon({ size = 16 }) {
 function SidebarUpdateBadge({ updates, wide, t }) {
   const version = useSyncExternalStore(updates.subscribe, updates.getSnapshot);
   if (version?.status !== 'update_available') return null;
-  return <span className={wide ? 'dsh-use-chatgpt-update-badge' : 'dsh-use-chatgpt-update-sr'}>{t('updateBadge')}</span>;
+  if (wide) return <span className="dsh-use-chatgpt-update-badge">{t('updateBadge')}</span>;
+  return <span className="dsh-use-chatgpt-update-dot"><span className="dsh-use-chatgpt-update-sr">{t('updateBadge')}</span></span>;
 }
 
 export const inject = ['locale', 'slots'];
