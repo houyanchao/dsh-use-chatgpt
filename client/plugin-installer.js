@@ -26,6 +26,7 @@ export function createPluginInstaller(ctx) {
       const installed = new Set(bundles.filter(bundle =>
         bundle.installed || bundle.availability === 'profile' || bundle.availability === 'installation')
         .map(bundle => bundle.name));
+      if (installed.has('@houyanchao/dsh-free-model')) installed.add('dsh-open-model');
       if (current === revision) {
         update({ inventory: 'ready', installed, error: installed.has(state.error?.name) ? null : state.error });
       }

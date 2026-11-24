@@ -4,7 +4,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { createPluginInstaller } from '../client/plugin-installer.js';
 
 const registry = 'https://registry.npmjs.org/';
-const freeModel = '@houyanchao/dsh-free-model';
+const freeModel = 'dsh-open-model';
 const timeline = 'dsh-timeline';
 const ok = value => ({ ok: true, value });
 const accepted = name => ({ status: 'accepted', name, version: '1.2.3', bundle: true, registry });
@@ -70,6 +70,17 @@ test('installs the inspected official version once and rejoins a lost install re
   ]);
   assert(installer.getSnapshot().installed.has(freeModel));
   assert.equal(installer.getSnapshot().pending, null);
+  assert.equal(installer.getSnapshot().error, null);
+});
+
+test('recognizes the old scoped package without installing a second provider', async t => {
+  const { installer } = setup(t, {
+    listBundles: () => ok([{ name: '@houyanchao/dsh-free-model', installed: true }]),
+    inspect: () => assert.fail('already installed under its old name'),
+  });
+  await nextTurn();
+  assert(installer.getSnapshot().installed.has(freeModel));
+  await installer.install(freeModel);
   assert.equal(installer.getSnapshot().error, null);
 });
 

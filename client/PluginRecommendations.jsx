@@ -1,8 +1,8 @@
 import { useId, useSyncExternalStore } from 'react';
 
 const plugins = [
-  { title: 'dsh-free-model', packageName: '@houyanchao/dsh-free-model', description: 'freeModelsDescription',
-    guide: 'https://github.com/houyanchao/dsh-free-model#在自研-dsh-客户端安装' },
+  { title: 'dsh-open-model', packageName: 'dsh-open-model', description: 'freeModelsDescription',
+    guide: 'https://github.com/houyanchao/dsh-open-model#在自研-dsh-客户端安装' },
   { title: 'dsh-timeline', packageName: 'dsh-timeline', description: 'timelineDescription',
     guide: 'https://github.com/houyanchao/dsh-timeline#-安装' },
   { title: 'timeline', description: 'browserDescription', stores: [
