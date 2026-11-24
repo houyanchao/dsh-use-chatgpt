@@ -169,7 +169,7 @@ export function createChatGPT(config) {
     const sourceProfileId = displayed.profileId;
     const attempt = { controller: new AbortController(), addingAccount };
     login = attempt;
-    const timeout = AbortSignal.timeout(60_000);
+    const timeout = AbortSignal.timeout(3 * 60_000);
     const signals = [attempt.controller.signal, timeout];
     if (options.signal) signals.push(options.signal);
     const signal = AbortSignal.any(signals);

@@ -586,11 +586,11 @@ test('DSH gates models by profile grant and isolates account changes, in-flight 
 
   const deadline = new AbortController();
   const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-  const timeout = t.mock.method(AbortSignal, 'timeout', ms => ms === 60_000 ? deadline.signal : realTimeout(ms));
+  const timeout = t.mock.method(AbortSignal, 'timeout', ms => ms === 180_000 ? deadline.signal : realTimeout(ms));
   browserPaused = Promise.withResolvers();
   const timedOut = accountResult('sign-in', { newProfile: true });
   await browserPaused.promise;
-  assert.ok(timeout.mock.calls.some(call => call.arguments[0] === 60_000));
+  assert.ok(timeout.mock.calls.some(call => call.arguments[0] === 180_000));
   deadline.abort(new DOMException('Authorization timed out', 'TimeoutError'));
   assert.equal((await timedOut).state.error.code, 'authorization_timeout');
   timeout.mock.restore();
