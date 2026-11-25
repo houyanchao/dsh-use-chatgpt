@@ -1,7 +1,7 @@
 {
   "name": "dsh-use-chatgpt",
-  "version": "1.0.3",
-  "description": "ChatGPT plan model provider for a local DeepSeek Harness desktop instance",
+  "version": "1.0.4",
+  "description": "DSH插件：让 DSH 直接使用你的 ChatGPT 套餐额度。",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "license": "GPL-3.0-or-later",
