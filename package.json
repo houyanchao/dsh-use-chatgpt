@@ -1,6 +1,6 @@
 {
   "name": "dsh-use-chatgpt",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
