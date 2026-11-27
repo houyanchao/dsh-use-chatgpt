@@ -1,7 +1,7 @@
 {
   "name": "dsh-use-chatgpt",
   "version": "1.0.4",
-  "description": "DSH插件：让 DSH 直接使用你的 ChatGPT 套餐额度。",
+  "description": "在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。",
   "type": "module",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "license": "GPL-3.0-or-later",
@@ -12,9 +12,10 @@
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
-  "files": ["dist", "docs/images/chatgpt-settings.png", "native/credential-key", "native/credential-key-universal", "cordis.patch.yml"],
+  "files": ["locale/*.json", "dist", "docs/images/chatgpt-settings.png", "native/credential-key", "native/credential-key-universal", "cordis.patch.yml"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

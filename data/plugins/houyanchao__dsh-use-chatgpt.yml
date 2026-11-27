@@ -1,0 +1,6 @@
+url: https://github.com/houyanchao/dsh-use-chatgpt
+name: houyanchao/dsh-use-chatgpt
+category: model
+description:
+  en: Chat in DSH using your ChatGPT subscription, switch between accounts, and choose which models are shown for each account.
+  zh: 让 DSH 使用你的 ChatGPT 套餐额度。
