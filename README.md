@@ -17,7 +17,7 @@
 
 ## 📖 dsh-use-chatgpt 是什么？
 
-在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。当前支持本机 macOS 和 Windows。
+在 DeepSeek Harness 中使用你的 ChatGPT 套餐额度。
 
 ## ✨ 功能特性
 
@@ -46,27 +46,6 @@ dsh plugin --profile web add dsh-use-chatgpt
 2. 回到对话页，在模型选择器的「ChatGPT 套餐」下选择模型，发送消息即可。
 
 可用模型和套餐额度以 OpenAI 对当前账号的授权为准。
-
-## 🛠️ 从源码安装
-
-安装 Node.js（22.19+ 的 22.x 或 24+）和 npm，然后在项目目录打包。在 macOS 上还需要 Xcode Command Line Tools。
-
-```sh
-npm ci
-npm pack
-```
-
-在 macOS 上生成的 `.tgz` 可用于 Apple 芯片、Intel Mac 和 Windows。在 Windows 上打包可生成 Windows 安装包。
-
-本机 Web profile 可运行 `dsh plugin --profile web add <安装包路径>`，然后重启本地服务。支持本地插件调试的桌面客户端可从「开发 → 本地插件调试」导入已构建的项目目录。
-
-官方独立桌面客户端通过插件管理从 npm 安装，测试本地安装包可使用上面的 Web profile。
-
-## 🔑 登录与更新
-
-插件按 OpenAI 的公开授权流程登录，通过官方 OpenAI JavaScript SDK 调用 Responses API。账号凭据加密保存在用户的 DeepSeek Harness 数据目录。已有账号沿用原来的加密文件和系统密钥。
-
-`vendor/devkit/` 是[官方 DevKit 源码快照](https://github.com/openai/sign-in-with-chatgpt-devkit/tree/0a36fefeb913055c8c7a1a29b63d82b96b2e841a)，可直接整目录替换。插件自己的登录和对话代码位于 `host/chatgpt/`。更新快照后，请对照[官方接入文档](https://developers.openai.com/siwc/token-sharing-open-source)检查协议变化，并运行 `npm test` 和 `npm run build`。
 
 ## ⭐ 支持一下
 
