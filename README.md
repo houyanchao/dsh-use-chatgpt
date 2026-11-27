@@ -11,6 +11,8 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/houyanchao/dsh-use-chatgpt/pulls)
 [![GitHub stars](https://img.shields.io/github/stars/houyanchao/dsh-use-chatgpt?style=social)](https://github.com/houyanchao/dsh-use-chatgpt)
 
+**简体中文** | [English](./README.en.md)
+
 ![DeepSeek Harness 的「关联 ChatGPT」设置页，展示当前账号和可用模型列表](./docs/images/chatgpt-settings.png)
 
 </div>
