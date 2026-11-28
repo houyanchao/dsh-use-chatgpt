@@ -31,7 +31,7 @@
 
 ### 安装方式 1（客户端）
 
-在 [DeepSeek Harness](https://www.deepseek.com/harness/) 客户端中搜索 `dsh-use-chatgpt` 进行安装。
+在 [DeepSeek Harness](https://www.deepseek.com/harness/) 客户端打开「插件」→「添加插件」，输入包名 `dsh-use-chatgpt`，点击「安装」。
 
 ![DeepSeek Harness 客户端中的「插件」页面、「添加插件」按钮和输入框](./docs/install-client.png)
 
